@@ -4,36 +4,39 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 
 const app = express();
-const PORT = process.env.PORT || 7000;
+const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/antigravity_db";
 
-// Middleware
 app.use(express.json());
-app.use(cors()); // للسماح للـ React بالاتصال بالـ Backend
+app.use(cors());
 
-// 1. الاتصال بقاعدة البيانات MongoDB
 mongoose
     .connect(MONGO_URI)
     .then(() => console.log("✅ Connecté avec succès à MongoDB"))
     .catch((err) => console.error("❌ Erreur de connexion MongoDB:", err));
 
-// 2. تعريف Schema و Model الحسابات
+// Schema فرعية لتفاصيل كل نموذج (Gemini / GPT)
+const modelDetailSchema = new mongoose.Schema({
+    enabled: { type: Boolean, default: false },
+    status: { type: String, enum: ["suspended", "active"], default: "suspended" },
+    blockedAt: { type: Date, default: Date.now },
+    daysToWait: { type: Number, default: 0 },
+    hoursToWait: { type: Number, default: 0 },
+    minutesToWait: { type: Number, default: 0 },
+});
+
+// Schema الحساب الأساسية
 const accountSchema = new mongoose.Schema(
     {
         email: { type: String, required: true },
         ownerName: { type: String, required: true },
-        status: { type: String, enum: ["suspended", "active"], default: "suspended" },
-        blockedAt: { type: Date, default: Date.now },
-        daysToWait: { type: Number, default: 0 },
-        hoursToWait: { type: Number, default: 0 },
-        minutesToWait: { type: Number, default: 0 },
+        gemini: modelDetailSchema,
+        gpt: modelDetailSchema,
     },
     { timestamps: true }
 );
 
 const Account = mongoose.model("Account", accountSchema);
-
-// 3. المسارات (Routes)
 
 // جلب جميع الحسابات
 app.get("/api/accounts", async (req, res) => {
@@ -45,19 +48,22 @@ app.get("/api/accounts", async (req, res) => {
     }
 });
 
-// إضافة حساب جديد إلى قاعدة البيانات
+// إضافة حساب جديد
 app.post("/api/accounts", async (req, res) => {
     try {
-        const { email, ownerName, status, daysToWait, hoursToWait, minutesToWait } = req.body;
+        const { email, ownerName, gemini, gpt } = req.body;
 
         const newAccount = new Account({
             email,
             ownerName,
-            status,
-            blockedAt: new Date(),
-            daysToWait: status === "suspended" ? Number(daysToWait) : 0,
-            hoursToWait: status === "suspended" ? Number(hoursToWait) : 0,
-            minutesToWait: status === "suspended" ? Number(minutesToWait) : 0,
+            gemini: {
+                ...gemini,
+                blockedAt: new Date(),
+            },
+            gpt: {
+                ...gpt,
+                blockedAt: new Date(),
+            },
         });
 
         const savedAccount = await newAccount.save();
@@ -67,7 +73,7 @@ app.post("/api/accounts", async (req, res) => {
     }
 });
 
-// حذف حساب من قاعدة البيانات
+// حذف حساب
 app.delete("/api/accounts/:id", async (req, res) => {
     try {
         const { id } = req.params;
@@ -78,7 +84,6 @@ app.delete("/api/accounts/:id", async (req, res) => {
     }
 });
 
-// تشغيل السيرفر
 app.listen(PORT, () => {
     console.log(`🚀 Serveur en cours d'exécution sur http://localhost:${PORT}`);
 });
