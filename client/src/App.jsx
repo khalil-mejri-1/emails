@@ -5,12 +5,13 @@ const API_URL = 'https://emails-zeta-rust.vercel.app/api/accounts';
 function App() {
   const [accounts, setAccounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // حالة التعديل والتعرف على الحساب المختار
+  // حالة التعديل والحساب المختار
   const [editingAccountId, setEditingAccountId] = useState(null);
 
-  // حالة نافذة تأكيد الحذف
+  // حالة تأكيد الحذف
   const [accountToDelete, setAccountToDelete] = useState(null);
 
   // Form States
@@ -21,7 +22,7 @@ function App() {
   const [enableGemini, setEnableGemini] = useState(true);
   const [enableGpt, setEnableGpt] = useState(true);
 
-  // Duration Mode
+  // Duration Mode: 'unified' أو 'custom'
   const [durationMode, setDurationMode] = useState('unified');
 
   // Unified Duration
@@ -65,14 +66,12 @@ function App() {
     }
   };
 
-  // فتح نموذج إضافة جديد
   const handleOpenAddModal = () => {
     resetForm();
     setEditingAccountId(null);
     setIsModalOpen(true);
   };
 
-  // فتح نموذج تعديل حساب قائم
   const handleOpenEditModal = (acc) => {
     setEditingAccountId(acc._id || acc.id);
     setEmail(acc.email || '');
@@ -83,7 +82,7 @@ function App() {
     setEnableGemini(hasGemini);
     setEnableGpt(hasGpt);
 
-    setDurationMode('custom'); // استخدام الوضع المخصص لملء البيانات بدقة
+    setDurationMode('custom');
 
     if (acc.gemini) {
       setGeminiStatus(acc.gemini.status || 'suspended');
@@ -102,10 +101,11 @@ function App() {
     setIsModalOpen(true);
   };
 
-  // حفظ الحساب (إضافة أو تعديل)
   const handleSaveAccount = async (e) => {
     e.preventDefault();
     if (!email || !ownerName || (!enableGemini && !enableGpt)) return;
+
+    setIsSubmitting(true);
 
     const accountData = {
       email,
@@ -149,10 +149,11 @@ function App() {
       }
     } catch (error) {
       console.error("Erreur lors de l'enregistrement du compte:", error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // تأكيد الحذف النهائي
   const confirmDelete = async () => {
     if (!accountToDelete) return;
     const id = accountToDelete._id || accountToDelete.id;
@@ -282,7 +283,7 @@ function App() {
                 className="relative bg-slate-900/60 border border-slate-800 hover:border-slate-700 rounded-xl p-3.5 backdrop-blur-md shadow-md flex flex-col justify-between transition-all hover:translate-y-[-2px] hover:shadow-xl"
               >
                 <div>
-                  {/* Top: Email & Action Buttons (Edit / Delete) */}
+                  {/* Top: Email & Action Buttons */}
                   <div className="flex justify-between items-start mb-2 gap-2">
                     <div className="flex items-center gap-1">
                       <button
@@ -615,14 +616,44 @@ function App() {
               <div className="flex gap-2 pt-2">
                 <button
                   type="submit"
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 rounded-xl transition-colors"
+                  disabled={isSubmitting}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 disabled:cursor-not-allowed text-white font-medium py-2 rounded-xl transition-colors flex items-center justify-center gap-2"
                 >
-                  {editingAccountId ? 'Mettre à jour' : 'Enregistrer'}
+                  {isSubmitting ? (
+                    <>
+                      <svg
+                        className="animate-spin h-4 w-4 text-white"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      <span>Patientez...</span>
+                    </>
+                  ) : editingAccountId ? (
+                    'Mettre à jour'
+                  ) : (
+                    'Enregistrer'
+                  )}
                 </button>
                 <button
                   type="button"
+                  disabled={isSubmitting}
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 rounded-xl transition-colors"
+                  className="px-4 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 font-medium py-2 rounded-xl transition-colors"
                 >
                   Annuler
                 </button>
