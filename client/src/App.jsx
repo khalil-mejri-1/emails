@@ -347,7 +347,7 @@ function App() {
                 <div>
                   <label className="block text-slate-300 mb-1 font-medium">Adresse e-mail</label>
                   <input
-                    type="email"
+                    type="text"
                     required
                     placeholder="exemple@gmail.com"
                     value={email}
