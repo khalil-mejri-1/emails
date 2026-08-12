@@ -7,6 +7,12 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  // حالة التعديل والتعرف على الحساب المختار
+  const [editingAccountId, setEditingAccountId] = useState(null);
+
+  // حالة نافذة تأكيد الحذف
+  const [accountToDelete, setAccountToDelete] = useState(null);
+
   // Form States
   const [email, setEmail] = useState('');
   const [ownerName, setOwnerName] = useState('');
@@ -15,7 +21,7 @@ function App() {
   const [enableGemini, setEnableGemini] = useState(true);
   const [enableGpt, setEnableGpt] = useState(true);
 
-  // Duration Mode: 'unified' (مدة موحدة) أو 'custom' (مدة مخصصة لكل نموذج)
+  // Duration Mode
   const [durationMode, setDurationMode] = useState('unified');
 
   // Unified Duration
@@ -59,7 +65,45 @@ function App() {
     }
   };
 
-  const handleAddAccount = async (e) => {
+  // فتح نموذج إضافة جديد
+  const handleOpenAddModal = () => {
+    resetForm();
+    setEditingAccountId(null);
+    setIsModalOpen(true);
+  };
+
+  // فتح نموذج تعديل حساب قائم
+  const handleOpenEditModal = (acc) => {
+    setEditingAccountId(acc._id || acc.id);
+    setEmail(acc.email || '');
+    setOwnerName(acc.ownerName || '');
+
+    const hasGemini = acc.gemini?.enabled ?? false;
+    const hasGpt = acc.gpt?.enabled ?? false;
+    setEnableGemini(hasGemini);
+    setEnableGpt(hasGpt);
+
+    setDurationMode('custom'); // استخدام الوضع المخصص لملء البيانات بدقة
+
+    if (acc.gemini) {
+      setGeminiStatus(acc.gemini.status || 'suspended');
+      setGeminiDays(acc.gemini.daysToWait || 0);
+      setGeminiHours(acc.gemini.hoursToWait || 0);
+      setGeminiMinutes(acc.gemini.minutesToWait || 0);
+    }
+
+    if (acc.gpt) {
+      setGptStatus(acc.gpt.status || 'suspended');
+      setGptDays(acc.gpt.daysToWait || 0);
+      setGptHours(acc.gpt.hoursToWait || 0);
+      setGptMinutes(acc.gpt.minutesToWait || 0);
+    }
+
+    setIsModalOpen(true);
+  };
+
+  // حفظ الحساب (إضافة أو تعديل)
+  const handleSaveAccount = async (e) => {
     e.preventDefault();
     if (!email || !ownerName || (!enableGemini && !enableGpt)) return;
 
@@ -83,31 +127,41 @@ function App() {
     };
 
     try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
+      const isEditing = Boolean(editingAccountId);
+      const url = isEditing ? `${API_URL}/${editingAccountId}` : API_URL;
+      const method = isEditing ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(accountData),
       });
 
       if (response.ok) {
         const savedAccount = await response.json();
-        setAccounts([savedAccount, ...accounts]);
+        if (isEditing) {
+          setAccounts(accounts.map((acc) => ((acc._id || acc.id) === editingAccountId ? savedAccount : acc)));
+        } else {
+          setAccounts([savedAccount, ...accounts]);
+        }
         resetForm();
         setIsModalOpen(false);
       }
     } catch (error) {
-      console.error("Erreur lors de l'ajout du compte:", error);
+      console.error("Erreur lors de l'enregistrement du compte:", error);
     }
   };
 
-  const handleDelete = async (id) => {
-    try {
-      const response = await fetch(`${API_URL}/${id}`, {
-        method: 'DELETE',
-      });
+  // تأكيد الحذف النهائي
+  const confirmDelete = async () => {
+    if (!accountToDelete) return;
+    const id = accountToDelete._id || accountToDelete.id;
 
+    try {
+      const response = await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
       if (response.ok) {
         setAccounts(accounts.filter((acc) => (acc._id || acc.id) !== id));
+        setAccountToDelete(null);
       }
     } catch (error) {
       console.error('Erreur lors de la suppression:', error);
@@ -115,6 +169,7 @@ function App() {
   };
 
   const resetForm = () => {
+    setEditingAccountId(null);
     setEmail('');
     setOwnerName('');
     setEnableGemini(true);
@@ -135,12 +190,7 @@ function App() {
   };
 
   const getTotalDurationMs = (days, hours, minutes) => {
-    return (
-      (Number(days) * 24 * 60 * 60 +
-        Number(hours) * 60 * 60 +
-        Number(minutes) * 60) *
-      1000
-    );
+    return (Number(days) * 24 * 60 * 60 + Number(hours) * 60 * 60 + Number(minutes) * 60) * 1000;
   };
 
   const getModelDetails = (modelData) => {
@@ -156,14 +206,8 @@ function App() {
       };
     }
 
-    const totalMs = getTotalDurationMs(
-      modelData.daysToWait,
-      modelData.hoursToWait,
-      modelData.minutesToWait
-    );
-    const returnDate = new Date(
-      new Date(modelData.blockedAt).getTime() + totalMs
-    );
+    const totalMs = getTotalDurationMs(modelData.daysToWait, modelData.hoursToWait, modelData.minutesToWait);
+    const returnDate = new Date(new Date(modelData.blockedAt).getTime() + totalMs);
     const diffMs = returnDate - new Date();
 
     if (diffMs <= 0) {
@@ -181,10 +225,7 @@ function App() {
     const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
 
-    const progress = Math.max(
-      0,
-      Math.min(100, ((totalMs - diffMs) / totalMs) * 100)
-    );
+    const progress = Math.max(0, Math.min(100, ((totalMs - diffMs) / totalMs) * 100));
     const isLessThanOneDay = diffMs <= 24 * 60 * 60 * 1000;
 
     return {
@@ -212,13 +253,11 @@ function App() {
           <h1 className="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-violet-500 bg-clip-text text-transparent">
             Suivi des comptes AntiGravity
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
-            Gestion et suivi multi-modèles (Gemini & ChatGPT)
-          </p>
+          <p className="text-slate-400 text-sm mt-1">Gestion et suivi multi-modèles (Gemini & ChatGPT)</p>
         </div>
 
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={handleOpenAddModal}
           className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-medium px-5 py-2.5 rounded-xl shadow-lg shadow-indigo-500/20 transition-all active:scale-95"
         >
           <span className="text-xl">+</span> Ajouter un compte
@@ -243,15 +282,24 @@ function App() {
                 className="relative bg-slate-900/60 border border-slate-800 hover:border-slate-700 rounded-xl p-3.5 backdrop-blur-md shadow-md flex flex-col justify-between transition-all hover:translate-y-[-2px] hover:shadow-xl"
               >
                 <div>
-                  {/* Top: Email & Delete Button */}
+                  {/* Top: Email & Action Buttons (Edit / Delete) */}
                   <div className="flex justify-between items-start mb-2 gap-2">
-                    <button
-                      onClick={() => handleDelete(id)}
-                      className="text-slate-500 hover:text-rose-400 transition-colors p-1 text-sm rounded-lg hover:bg-slate-800/50"
-                      title="Supprimer le compte"
-                    >
-                      ✕
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleOpenEditModal(acc)}
+                        className="text-slate-400 hover:text-indigo-400 transition-colors p-1 rounded-lg hover:bg-slate-800/50"
+                        title="Modifier le compte"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => setAccountToDelete(acc)}
+                        className="text-slate-500 hover:text-rose-400 transition-colors p-1 rounded-lg hover:bg-slate-800/50"
+                        title="Supprimer le compte"
+                      >
+                        🗑️
+                      </button>
+                    </div>
                     <div className="text-right truncate">
                       <h3 className="font-semibold text-sm text-slate-100 truncate" title={acc.email}>
                         {acc.email}
@@ -327,21 +375,20 @@ function App() {
         </div>
       )}
 
-      {/* Modal */}
+      {/* Add / Edit Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold text-slate-100">Ajouter un nouveau compte</h2>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-200"
-              >
+              <h2 className="text-lg font-bold text-slate-100">
+                {editingAccountId ? 'Modifier le compte' : 'Ajouter un nouveau compte'}
+              </h2>
+              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-200">
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleAddAccount} className="space-y-4 text-xs">
+            <form onSubmit={handleSaveAccount} className="space-y-4 text-xs">
               {/* Account Basic Info */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -570,7 +617,7 @@ function App() {
                   type="submit"
                   className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 rounded-xl transition-colors"
                 >
-                  Enregistrer
+                  {editingAccountId ? 'Mettre à jour' : 'Enregistrer'}
                 </button>
                 <button
                   type="button"
@@ -581,6 +628,39 @@ function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {accountToDelete && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4">
+            <div className="w-12 h-12 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto text-xl border border-rose-500/20">
+              ⚠️
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-100">Confirmer la suppression</h3>
+              <p className="text-xs text-slate-400 mt-2">
+                Êtes-vous sûr de vouloir supprimer le compte{' '}
+                <span className="text-slate-200 font-semibold">{accountToDelete.email}</span> ? Cette action est
+                irréversible.
+              </p>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={confirmDelete}
+                className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-medium py-2 rounded-xl text-xs transition-colors"
+              >
+                Confirmer
+              </button>
+              <button
+                onClick={() => setAccountToDelete(null)}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 rounded-xl text-xs transition-colors"
+              >
+                Annuler
+              </button>
+            </div>
           </div>
         </div>
       )}
