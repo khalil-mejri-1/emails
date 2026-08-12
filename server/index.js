@@ -84,6 +84,28 @@ app.delete("/api/accounts/:id", async (req, res) => {
     }
 });
 
+// تحديث حساب موجود
+app.put("/api/accounts/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { email, ownerName, gemini, gpt } = req.body;
+
+        const updatedAccount = await Account.findByIdAndUpdate(
+            id,
+            { email, ownerName, gemini, gpt },
+            { new: true } // لإرجاع البيانات الجديدة بعد التحديث
+        );
+
+        if (!updatedAccount) {
+            return res.status(404).json({ message: "Compte non trouvé" });
+        }
+
+        res.json(updatedAccount);
+    } catch (error) {
+        res.status(400).json({ message: "Erreur lors de la mise à jour", error: error.message });
+    }
+});
+
 app.listen(PORT, () => {
     console.log(`🚀 Serveur en cours d'exécution sur http://localhost:${PORT}`);
 });
