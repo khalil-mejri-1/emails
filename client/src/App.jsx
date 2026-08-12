@@ -249,11 +249,18 @@ function App() {
   return (
     <div className="min-h-screen bg-[#070913] text-slate-100 p-4 sm:p-8 font-sans dir-ltr">
       {/* Header */}
+      {/* Header */}
       <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10 pb-6 border-b border-slate-800/60">
         <div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-violet-500 bg-clip-text text-transparent">
-            Suivi des comptes AntiGravity
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-violet-500 bg-clip-text text-transparent">
+              Suivi des comptes AntiGravity
+            </h1>
+            {/* شارة إجمالي عدد الحسابات */}
+            <span className="bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 text-xs font-semibold px-2.5 py-1 rounded-full">
+              {accounts.length} Total
+            </span>
+          </div>
           <p className="text-slate-400 text-sm mt-1">Gestion et suivi multi-modèles (Gemini & ChatGPT)</p>
         </div>
 
