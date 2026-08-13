@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const API_URL = 'https://emails-zeta-rust.vercel.app/api/accounts';
 
@@ -7,6 +7,10 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Ref to track accounts that have already triggered Gemini finish alert
+  const notifiedGeminiRef = useRef(new Set());
 
   // حالة التعديل والحساب المختار
   const [editingAccountId, setEditingAccountId] = useState(null);
@@ -48,10 +52,10 @@ function App() {
   }, []);
 
   const [, setTick] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(timer);
-  }, []);
+
+  const getTotalDurationMs = (days, hours, minutes) => {
+    return (Number(days || 0) * 24 * 60 * 60 + Number(hours || 0) * 60 * 60 + Number(minutes || 0) * 60) * 1000;
+  };
 
   const fetchAccounts = async () => {
     try {
@@ -59,11 +63,86 @@ function App() {
       const response = await fetch(API_URL);
       const data = await response.json();
       setAccounts(data);
+
+      // On initial load, mark accounts whose Gemini wait duration has already ended
+      const alreadyEnded = new Set();
+      data.forEach((acc) => {
+        const id = acc._id || acc.id;
+        if (acc.gemini && acc.gemini.enabled) {
+          if (acc.gemini.status === 'active') {
+            alreadyEnded.add(id);
+          } else {
+            const totalMs = getTotalDurationMs(
+              acc.gemini.daysToWait,
+              acc.gemini.hoursToWait,
+              acc.gemini.minutesToWait
+            );
+            const returnDate = new Date(new Date(acc.gemini.blockedAt).getTime() + totalMs);
+            if (returnDate - new Date() <= 0) {
+              alreadyEnded.add(id);
+            }
+          }
+        }
+      });
+      notifiedGeminiRef.current = alreadyEnded;
     } catch (error) {
       console.error('Erreur lors du chargement des comptes:', error);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Timer interval for real-time updates and checking Gemini completion alert
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTick((t) => t + 1);
+
+      // Check for accounts whose Gemini timer just completed
+      accounts.forEach((acc) => {
+        const id = acc._id || acc.id;
+        if (acc.gemini && acc.gemini.enabled && acc.gemini.status === 'suspended') {
+          const totalMs = getTotalDurationMs(
+            acc.gemini.daysToWait,
+            acc.gemini.hoursToWait,
+            acc.gemini.minutesToWait
+          );
+          const returnDate = new Date(new Date(acc.gemini.blockedAt).getTime() + totalMs);
+          const diffMs = returnDate - new Date();
+
+          if (diffMs <= 0 && !notifiedGeminiRef.current.has(id)) {
+            notifiedGeminiRef.current.add(id);
+            alert(`🔔 تم انتهاء مدة الانتظار لنموذج Gemini للحساب:\n${acc.email} (${acc.ownerName})`);
+          }
+        }
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [accounts]);
+
+  // Helper to compute actual real-time remaining days, hours, minutes for a model
+  const getRemainingUnits = (modelData) => {
+    if (!modelData || !modelData.enabled || modelData.status === 'active') {
+      return { days: 0, hours: 0, minutes: 0 };
+    }
+    const totalMs = getTotalDurationMs(
+      modelData.daysToWait || 0,
+      modelData.hoursToWait || 0,
+      modelData.minutesToWait || 0
+    );
+    const blockedAtTime = modelData.blockedAt ? new Date(modelData.blockedAt).getTime() : Date.now();
+    const returnDate = new Date(blockedAtTime + totalMs);
+    const diffMs = returnDate - Date.now();
+
+    if (diffMs <= 0) {
+      return { days: 0, hours: 0, minutes: 0 };
+    }
+
+    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+    return { days, hours, minutes };
   };
 
   const handleOpenAddModal = () => {
@@ -86,16 +165,18 @@ function App() {
 
     if (acc.gemini) {
       setGeminiStatus(acc.gemini.status || 'suspended');
-      setGeminiDays(acc.gemini.daysToWait || 0);
-      setGeminiHours(acc.gemini.hoursToWait || 0);
-      setGeminiMinutes(acc.gemini.minutesToWait || 0);
+      const remG = getRemainingUnits(acc.gemini);
+      setGeminiDays(remG.days);
+      setGeminiHours(remG.hours);
+      setGeminiMinutes(remG.minutes);
     }
 
     if (acc.gpt) {
       setGptStatus(acc.gpt.status || 'suspended');
-      setGptDays(acc.gpt.daysToWait || 0);
-      setGptHours(acc.gpt.hoursToWait || 0);
-      setGptMinutes(acc.gpt.minutesToWait || 0);
+      const remGpt = getRemainingUnits(acc.gpt);
+      setGptDays(remGpt.days);
+      setGptHours(remGpt.hours);
+      setGptMinutes(remGpt.minutes);
     }
 
     setIsModalOpen(true);
@@ -113,6 +194,7 @@ function App() {
       gemini: {
         enabled: enableGemini,
         status: durationMode === 'unified' ? unifiedStatus : geminiStatus,
+        blockedAt: new Date(),
         daysToWait: durationMode === 'unified' ? Number(unifiedDays) : Number(geminiDays),
         hoursToWait: durationMode === 'unified' ? Number(unifiedHours) : Number(geminiHours),
         minutesToWait: durationMode === 'unified' ? Number(unifiedMinutes) : Number(geminiMinutes),
@@ -120,6 +202,7 @@ function App() {
       gpt: {
         enabled: enableGpt,
         status: durationMode === 'unified' ? unifiedStatus : gptStatus,
+        blockedAt: new Date(),
         daysToWait: durationMode === 'unified' ? Number(unifiedDays) : Number(gptDays),
         hoursToWait: durationMode === 'unified' ? Number(unifiedHours) : Number(gptHours),
         minutesToWait: durationMode === 'unified' ? Number(unifiedMinutes) : Number(gptMinutes),
@@ -190,10 +273,6 @@ function App() {
     setGptMinutes(0);
   };
 
-  const getTotalDurationMs = (days, hours, minutes) => {
-    return (Number(days) * 24 * 60 * 60 + Number(hours) * 60 * 60 + Number(minutes) * 60) * 1000;
-  };
-
   const getModelDetails = (modelData) => {
     if (!modelData || !modelData.enabled) return null;
 
@@ -246,17 +325,87 @@ function App() {
     };
   };
 
+  // Helper to determine the outer card border color (Red, Orange, or Green)
+  const getCardBorderStyle = (acc) => {
+    const getModelState = (modelData) => {
+      if (!modelData || !modelData.enabled) return null;
+      if (modelData.status === 'active') return 'green';
+      const totalMs = getTotalDurationMs(modelData.daysToWait, modelData.hoursToWait, modelData.minutesToWait);
+      const returnDate = new Date(new Date(modelData.blockedAt).getTime() + totalMs);
+      const diffMs = returnDate - new Date();
+      if (diffMs <= 0) return 'green';
+      if (diffMs <= 24 * 60 * 60 * 1000) return 'orange';
+      return 'red';
+    };
+
+    const states = [getModelState(acc.gemini), getModelState(acc.gpt)].filter(Boolean);
+
+    if (states.includes('red')) {
+      return 'border-2 border-rose-500/90 shadow-[0_0_18px_rgba(244,63,94,0.2)] bg-rose-950/10 hover:border-rose-400';
+    }
+    if (states.includes('orange')) {
+      return 'border-2 border-amber-500/90 shadow-[0_0_18px_rgba(245,158,11,0.2)] bg-amber-950/10 hover:border-amber-400';
+    }
+    return 'border-2 border-emerald-500/90 shadow-[0_0_18px_rgba(16,185,129,0.2)] bg-emerald-950/10 hover:border-emerald-400';
+  };
+
+  // Filter accounts by search query
+  const filteredAccounts = accounts.filter((acc) => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      acc.email?.toLowerCase().includes(q) ||
+      acc.ownerName?.toLowerCase().includes(q)
+    );
+  });
+
+  // Sort accounts: accounts whose Gemini wait duration has ended (or active/ready) come FIRST
+  const sortedAccounts = [...filteredAccounts].sort((a, b) => {
+    const getGeminiScore = (acc) => {
+      if (!acc.gemini || !acc.gemini.enabled) return 2;
+      if (acc.gemini.status === 'active') return 0;
+      const totalMs = getTotalDurationMs(
+        acc.gemini.daysToWait,
+        acc.gemini.hoursToWait,
+        acc.gemini.minutesToWait
+      );
+      const returnDate = new Date(new Date(acc.gemini.blockedAt).getTime() + totalMs);
+      const diffMs = returnDate - new Date();
+      if (diffMs <= 0) return 0; // ready/finished -> top priority (0)
+      return 1; // still waiting (1)
+    };
+
+    const scoreA = getGeminiScore(a);
+    const scoreB = getGeminiScore(b);
+
+    if (scoreA !== scoreB) {
+      return scoreA - scoreB;
+    }
+
+    if (scoreA === 1) {
+      const getDiff = (acc) => {
+        const totalMs = getTotalDurationMs(
+          acc.gemini.daysToWait,
+          acc.gemini.hoursToWait,
+          acc.gemini.minutesToWait
+        );
+        return new Date(acc.gemini.blockedAt).getTime() + totalMs - Date.now();
+      };
+      return getDiff(a) - getDiff(b);
+    }
+
+    return 0;
+  });
+
   return (
     <div className="min-h-screen bg-[#070913] text-slate-100 p-4 sm:p-8 font-sans dir-ltr">
-      {/* Header */}
-      {/* Header */}
-      <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10 pb-6 border-b border-slate-800/60">
+      {/* Header & Search Bar */}
+      <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4 mb-8 pb-6 border-b border-slate-800/60">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-violet-500 bg-clip-text text-transparent">
               Suivi des comptes AntiGravity
             </h1>
-            {/* شارة إجمالي عدد الحسابات */}
             <span className="bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 text-xs font-semibold px-2.5 py-1 rounded-full">
               {accounts.length} Total
             </span>
@@ -264,13 +413,44 @@ function App() {
           <p className="text-slate-400 text-sm mt-1">Gestion et suivi multi-modèles (Gemini & ChatGPT)</p>
         </div>
 
-        <button
-          onClick={handleOpenAddModal}
-          className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-medium px-5 py-2.5 rounded-xl shadow-lg shadow-indigo-500/20 transition-all active:scale-95"
-        >
-          <span className="text-xl">+</span> Ajouter un compte
-        </button>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          {/* Search Input */}
+          <div className="relative flex-1 sm:w-72">
+            <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+              🔍
+            </span>
+            <input
+              type="text"
+              placeholder="Rechercher par e-mail ou nom..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-800 focus:border-indigo-500 rounded-xl pl-9 pr-8 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition-colors"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-200"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={handleOpenAddModal}
+            className="flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-medium px-5 py-2 rounded-xl shadow-lg shadow-indigo-500/20 transition-all active:scale-95 text-sm"
+          >
+            <span className="text-xl">+</span> Ajouter un compte
+          </button>
+        </div>
       </div>
+
+      {/* Search results count info if filtering */}
+      {searchQuery && (
+        <div className="max-w-6xl mx-auto mb-4 text-xs text-slate-400">
+          Résultats pour « <span className="text-indigo-400 font-semibold">{searchQuery}</span> » : {sortedAccounts.length} compte(s) trouvé(s)
+        </div>
+      )}
 
       {/* Grid Accounts */}
       {isLoading ? (
@@ -279,15 +459,16 @@ function App() {
         </div>
       ) : (
         <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {accounts.map((acc) => {
+          {sortedAccounts.map((acc) => {
             const id = acc._id || acc.id;
             const geminiInfo = getModelDetails(acc.gemini);
             const gptInfo = getModelDetails(acc.gpt);
+            const cardBorderStyle = getCardBorderStyle(acc);
 
             return (
               <div
                 key={id}
-                className="relative bg-slate-900/60 border border-slate-800 hover:border-slate-700 rounded-xl p-3.5 backdrop-blur-md shadow-md flex flex-col justify-between transition-all hover:translate-y-[-2px] hover:shadow-xl"
+                className={`relative rounded-xl p-3.5 backdrop-blur-md flex flex-col justify-between transition-all hover:translate-y-[-2px] ${cardBorderStyle}`}
               >
                 <div>
                   {/* Top: Email & Action Buttons */}
@@ -375,9 +556,11 @@ function App() {
             );
           })}
 
-          {accounts.length === 0 && (
+          {sortedAccounts.length === 0 && (
             <div className="col-span-full text-center py-16 bg-slate-900/40 rounded-2xl border border-dashed border-slate-800">
-              <p className="text-slate-500 text-sm">Aucun compte enregistré pour le moment.</p>
+              <p className="text-slate-500 text-sm">
+                {searchQuery ? 'Aucun compte ne correspond à votre recherche.' : 'Aucun compte enregistré pour le moment.'}
+              </p>
             </div>
           )}
         </div>
@@ -547,27 +730,36 @@ function App() {
                           </div>
                           {geminiStatus === 'suspended' && (
                             <div className="grid grid-cols-3 gap-1.5">
-                              <input
-                                type="number"
-                                placeholder="Jours"
-                                value={geminiDays}
-                                onChange={(e) => setGeminiDays(e.target.value)}
-                                className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-center"
-                              />
-                              <input
-                                type="number"
-                                placeholder="Heures"
-                                value={geminiHours}
-                                onChange={(e) => setGeminiHours(e.target.value)}
-                                className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-center"
-                              />
-                              <input
-                                type="number"
-                                placeholder="Minutes"
-                                value={geminiMinutes}
-                                onChange={(e) => setGeminiMinutes(e.target.value)}
-                                className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-center"
-                              />
+                              <div>
+                                <span className="text-[10px] text-slate-400 block mb-0.5">Jours</span>
+                                <input
+                                  type="number"
+                                  placeholder="Jours"
+                                  value={geminiDays}
+                                  onChange={(e) => setGeminiDays(e.target.value)}
+                                  className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-center"
+                                />
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-400 block mb-0.5">Heures</span>
+                                <input
+                                  type="number"
+                                  placeholder="Heures"
+                                  value={geminiHours}
+                                  onChange={(e) => setGeminiHours(e.target.value)}
+                                  className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-center"
+                                />
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-400 block mb-0.5">Minutes</span>
+                                <input
+                                  type="number"
+                                  placeholder="Minutes"
+                                  value={geminiMinutes}
+                                  onChange={(e) => setGeminiMinutes(e.target.value)}
+                                  className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-center"
+                                />
+                              </div>
                             </div>
                           )}
                         </div>
@@ -589,27 +781,36 @@ function App() {
                           </div>
                           {gptStatus === 'suspended' && (
                             <div className="grid grid-cols-3 gap-1.5">
-                              <input
-                                type="number"
-                                placeholder="Jours"
-                                value={gptDays}
-                                onChange={(e) => setGptDays(e.target.value)}
-                                className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-center"
-                              />
-                              <input
-                                type="number"
-                                placeholder="Heures"
-                                value={gptHours}
-                                onChange={(e) => setGptHours(e.target.value)}
-                                className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-center"
-                              />
-                              <input
-                                type="number"
-                                placeholder="Minutes"
-                                value={gptMinutes}
-                                onChange={(e) => setGptMinutes(e.target.value)}
-                                className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-center"
-                              />
+                              <div>
+                                <span className="text-[10px] text-slate-400 block mb-0.5">Jours</span>
+                                <input
+                                  type="number"
+                                  placeholder="Jours"
+                                  value={gptDays}
+                                  onChange={(e) => setGptDays(e.target.value)}
+                                  className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-center"
+                                />
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-400 block mb-0.5">Heures</span>
+                                <input
+                                  type="number"
+                                  placeholder="Heures"
+                                  value={gptHours}
+                                  onChange={(e) => setGptHours(e.target.value)}
+                                  className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-center"
+                                />
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-400 block mb-0.5">Minutes</span>
+                                <input
+                                  type="number"
+                                  placeholder="Minutes"
+                                  value={gptMinutes}
+                                  onChange={(e) => setGptMinutes(e.target.value)}
+                                  className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-center"
+                                />
+                              </div>
                             </div>
                           )}
                         </div>
