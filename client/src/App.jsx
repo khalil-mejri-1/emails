@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 
-const API_URL = 'https://emails-zeta-rust.vercel.app/api/accounts';
+const API_URL = 'https://khalil-mejri-1-emails.vercel.app/api/accounts';
 
 function App() {
   const [accounts, setAccounts] = useState([]);
