@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 
-const API_URL = 'https://khalil-mejri-1-emails.vercel.app/api/accounts';
+const API_URL = 'https://emails-un4c.vercel.app/api/accounts';
 
 function App() {
   const [accounts, setAccounts] = useState([]);
@@ -62,6 +62,14 @@ function App() {
       setIsLoading(true);
       const response = await fetch(API_URL);
       const data = await response.json();
+
+      // Guard: if server returned an error object instead of an array, bail out
+      if (!response.ok || !Array.isArray(data)) {
+        console.error('Erreur serveur:', data);
+        setAccounts([]);
+        return;
+      }
+
       setAccounts(data);
 
       // On initial load, mark accounts whose Gemini wait duration has already ended

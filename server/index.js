@@ -106,6 +106,15 @@ app.put("/api/accounts/:id", async (req, res) => {
     }
 });
 
+app.get('/', (req, res) => {
+    res.json({
+        message: 'Hello World ',
+        database: isConnected ? 'Connected to MongoDB Atlas ' : 'Connecting / Offline',
+        status: 'success',
+        timestamp: new Date().toISOString(),
+    });
+});
+
 app.listen(PORT, () => {
     console.log(`🚀 Serveur en cours d'exécution sur http://localhost:${PORT}`);
 });
