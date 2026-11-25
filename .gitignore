@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+**/dist/
+build/
+**/build/
+
+# Environment files
+.env
+.env.*
+*.env
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Firebase & logs & archives
+.firebase/
+**/.firebase/
+firebase-debug.log*
+*.log
+*.zip
+.DS_Store
+Thumbs.db
